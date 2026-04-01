@@ -95,10 +95,20 @@ def main():
     try:
         # Download and preprocess
         logger.info('Creating dataset...')
+        logger.info('NOTE: This may take a while on first run (downloading ~2-5GB)')
+        logger.info('The dataset will be cached for future use.')
+        logger.info('')
+        
+        import time
+        start_time = time.time()
         dataset = AmazonReviews2014(config)
+        elapsed = time.time() - start_time
+        
+        logger.info('')
+        logger.info(f'✓ Dataset created in {elapsed:.1f}s')
+        logger.info('')
         
         # Print dataset statistics
-        logger.info('')
         logger.info(dataset)
         
         # Show processed file locations
@@ -117,7 +127,11 @@ def main():
         
         logger.info('')
         logger.info('✓ Dataset download and preprocessing complete!')
+        logger.info('You can now use this dataset in your training pipeline.')
         
+    except KeyboardInterrupt:
+        logger.warning('Dataset download interrupted by user.')
+        return 1
     except Exception as e:
         logger.error(f'Error during download/preprocessing: {e}', exc_info=True)
         return 1
