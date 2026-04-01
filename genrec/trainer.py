@@ -16,29 +16,7 @@ from genrec.utils import get_file_name, get_total_steps, config_for_log, log
 
 
 class Trainer:
-    """
-    A class that handles the training process for a model.
-
-    Args:
-        config (dict): The configuration parameters for training.
-        model (AbstractModel): The model to be trained.
-        tokenizer (AbstractTokenizer): The tokenizer used for tokenizing the data.
-
-    Attributes:
-        config (dict): The configuration parameters for training.
-        model (AbstractModel): The model to be trained.
-        evaluator (Evaluator): The evaluator used for evaluating the model.
-        logger (Logger): The logger used for logging training progress.
-        project_dir (str): The directory path for saving tensorboard logs.
-        accelerator (Accelerator): The accelerator used for distributed training
-        saved_model_ckpt (str): The file path for saving the trained model checkpoint.
-
-    Methods:
-        fit(train_dataloader, val_dataloader): Trains the model using the provided training and validation dataloaders.
-        evaluate(dataloader, split='test'): Evaluate the model on the given dataloader.
-        end(): Ends the training process and releases any used resources.
-    """
-
+    
     def __init__(self, config: dict, model: AbstractModel, tokenizer: AbstractTokenizer):
         self.config = config
         self.model = model
@@ -53,13 +31,6 @@ class Trainer:
         os.makedirs(os.path.dirname(self.saved_model_ckpt), exist_ok=True)
 
     def fit(self, train_dataloader, val_dataloader):
-        """
-        Trains the model using the provided training and validation dataloaders.
-
-        Args:
-            train_dataloader: The dataloader for training data.
-            val_dataloader: The dataloader for validation data.
-        """
         optimizer = AdamW(
             self.model.parameters(),
             lr=self.config['lr'],
@@ -140,16 +111,6 @@ class Trainer:
         return best_epoch, best_val_score
 
     def evaluate(self, dataloader, split='test'):
-        """
-        Evaluate the model on the given dataloader.
-
-        Args:
-            dataloader (torch.utils.data.DataLoader): The dataloader to evaluate on.
-            split (str, optional): The split name. Defaults to 'test'.
-
-        Returns:
-            OrderedDict: A dictionary containing the evaluation results.
-        """
         self.model.eval()
 
         all_results = defaultdict(list)
@@ -186,16 +147,7 @@ class Trainer:
         return output_results
 
     def case_evaluate(self, dataloader, split='test'):
-        """
-        Evaluate the model on the given dataloader.
-
-        Args:
-            dataloader (torch.utils.data.DataLoader): The dataloader to evaluate on.
-            split (str, optional): The split name. Defaults to 'test'.
-
-        Returns:
-            OrderedDict: A dictionary containing the evaluation results.
-        """
+     
         self.model.eval()
 
         diff2gap = defaultdict(list)
@@ -244,16 +196,6 @@ class Trainer:
         return diff2gap
 
     def evaluate_cold_start(self, dataloader, token2item, item2group, split='test'):
-        """
-        Evaluate the model on the given dataloader.
-
-        Args:
-            dataloader (torch.utils.data.DataLoader): The dataloader to evaluate on.
-            split (str, optional): The split name. Defaults to 'test'.
-
-        Returns:
-            OrderedDict: A dictionary containing the evaluation results.
-        """
         self.model.eval()
 
         all_results = defaultdict(list)
@@ -303,9 +245,6 @@ class Trainer:
         return output_results, group2results
 
     def end(self):
-        """
-        Ends the training process and releases any used resources
-        """
         self.accelerator.end_training()
 
     def log(self, message, level='info'):
