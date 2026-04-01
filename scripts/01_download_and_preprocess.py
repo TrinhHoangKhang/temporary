@@ -3,11 +3,6 @@ Standalone script to download and preprocess the dataset independently.
 
 Usage:
     python scripts/01_download_and_preprocess.py --category Books --cache_dir ./cache
-
-This script can be run without the full pipeline, making it easy to:
-- Download data once and reuse it
-- Test different datasets
-- Preprocess data on a different machine
 """
 
 import argparse
@@ -24,27 +19,6 @@ def setup_logging():
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-
-
-def create_minimal_config(category, cache_dir, metadata_mode):
-    """
-    Create a minimal config dict needed for dataset download/preprocessing.
-    
-    Args:
-        category: Amazon category (e.g., 'Books')
-        cache_dir: Where to cache downloaded data
-        metadata_mode: 'none', 'raw', or 'sentence'
-    
-    Returns:
-        Minimal config dict
-    """
-    return {
-        'category': category,
-        'cache_dir': cache_dir,
-        'metadata': metadata_mode,
-        'split': 'leave_one_out',
-        # accelerator is NOT included - dataset will work without it
-    }
 
 
 def main():
@@ -70,6 +44,12 @@ def main():
         choices=['none', 'raw', 'sentence'],
         help='How to process metadata'
     )
+    parser.add_argument(
+        '--split',
+        type=str,
+        default='leave_one_out',
+        help='Data split strategy (default: leave_one_out)'
+    )
     
     args = parser.parse_args()
     
@@ -78,7 +58,7 @@ def main():
     logger = logging.getLogger(__name__)
     
     logger.info('='*60)
-    logger.info('Dataset Download & Preprocessing (Standalone Mode)')
+    logger.info('Dataset Download & Preprocessing')
     logger.info('='*60)
     logger.info(f'Category: {args.category}')
     logger.info(f'Cache dir: {args.cache_dir}')
@@ -86,26 +66,27 @@ def main():
     logger.info('='*60)
     
     # Create minimal config
-    config = create_minimal_config(
-        category=args.category,
-        cache_dir=args.cache_dir,
-        metadata_mode=args.metadata_mode
-    )
+    config = {
+        'category': args.category,
+        'cache_dir': args.cache_dir,
+        'metadata': args.metadata_mode,
+        'split': args.split,
+        # accelerator is NOT included - dataset will work without it
+    }
     
     try:
         # Download and preprocess
         logger.info('Creating dataset...')
-        logger.info('NOTE: This may take a while on first run (downloading ~2-5GB)')
-        logger.info('The dataset will be cached for future use.')
         logger.info('')
         
         import time
         start_time = time.time()
+    
         dataset = AmazonReviews2014(config)
         elapsed = time.time() - start_time
         
         logger.info('')
-        logger.info(f'✓ Dataset created in {elapsed:.1f}s')
+        logger.info(f'Dataset created in {elapsed:.1f}s')
         logger.info('')
         
         # Print dataset statistics
@@ -119,15 +100,14 @@ def main():
             'processed'
         )
         logger.info('')
-        logger.info(f'✓ Processed data saved to: {processed_dir}')
+        logger.info(f'Processed data saved to: {processed_dir}')
         logger.info(f'  - all_item_seqs.json')
         logger.info(f'  - id_mapping.json')
         if args.metadata_mode != 'none':
             logger.info(f'  - metadata.{args.metadata_mode}.json')
         
         logger.info('')
-        logger.info('✓ Dataset download and preprocessing complete!')
-        logger.info('You can now use this dataset in your training pipeline.')
+        logger.info('Dataset download and preprocessing complete!')
         
     except KeyboardInterrupt:
         logger.warning('Dataset download interrupted by user.')
