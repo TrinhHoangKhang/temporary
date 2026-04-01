@@ -23,29 +23,19 @@ class Pipeline:
         config_dict: dict = None,
         config_file: str = None,
     ):
-        """
-        Build all runtime components for one experiment.
 
-        Args:
-            model_name: Model key string (registered in utils) or model class.
-            dataset_name: Dataset key string (registered in utils) or dataset class.
-            checkpoint_path: Optional checkpoint to load before evaluation/training.
-            tokenizer: Optional tokenizer class override.
-            trainer: Optional trainer instance override.
-            config_dict: Runtime config overrides.
-            config_file: Optional yaml config path.
-        """
         self.config = get_config(
             model_name=model_name,
             dataset_name=dataset_name,
             config_file=config_file,
             config_dict=config_dict
         )
-        # Resolve runtime device and whether distributed training is enabled.
+        # Detect device and DDP setup.
         self.config['device'], self.config['use_ddp'] = init_device() 
         self.checkpoint_path = checkpoint_path
 
-        # Configure experiment log directory and accelerator tracker backend.
+
+        # Setup accelerator and TensorBoard logging.
         self.project_dir = os.path.join(
             self.config['tensorboard_log_dir'],
             self.config["dataset"],
@@ -54,18 +44,21 @@ class Pipeline:
         self.accelerator = Accelerator(log_with='tensorboard', project_dir=self.project_dir)
         self.config['accelerator'] = self.accelerator
 
+
         # Initialize seed and shared logger after accelerator is ready.
         init_seed(self.config['rand_seed'], self.config['reproducibility'])
         init_logger(self.config)
         self.logger = getLogger()
         self.log(f'Device: {self.config["device"]}')
+        
 
-        # Build raw dataset and split into train/val/test in raw-ID space.
+        # Load dataset and create train/val/test splits.
         self.raw_dataset = get_dataset(dataset_name)(self.config)
         self.log(self.raw_dataset)
         self.split_datasets = self.raw_dataset.split()
+        
 
-        # Build tokenizer (custom override or model-registered default), then tokenize splits.
+        # Initialize tokenizer and tokenize all splits.
         if tokenizer is not None:
             self.tokenizer = tokenizer(self.config, self.raw_dataset)
         else:
@@ -78,15 +71,16 @@ class Pipeline:
             self.log(f'ERROR during tokenization: {e}', level='error')
             raise
 
-        # Build model on main process first to avoid duplicated expensive initialization.
+
+        # Build model (main process only to avoid redundant initialization) and load checkpoint if provided.
         with self.accelerator.main_process_first():
             self.model = get_model(model_name)(self.config, self.raw_dataset, self.tokenizer)
             if checkpoint_path is not None:
-                # Restore user-provided checkpoint for fine-tuning or direct evaluation.
                 self.model.load_state_dict(torch.load(checkpoint_path, map_location=self.config['device']))
                 self.log(f'Loaded model checkpoint from {checkpoint_path}')
         self.log(self.model)
         self.log(self.model.n_parameters)
+
 
         # Build trainer (override allowed for custom training loops).
         if trainer is not None:
@@ -104,7 +98,7 @@ class Pipeline:
                 - `best_val_score`
                 - `test_results`
         """
-        # Build split-specific dataloaders; tokenizer can provide custom collate functions.
+        # Create dataloaders with tokenizer-specific collation functions.
         train_dataloader = DataLoader(
             self.tokenized_datasets['train'],
             batch_size=self.config['train_batch_size'],
@@ -124,36 +118,32 @@ class Pipeline:
             collate_fn=self.tokenizer.collate_fn['test']
         )
 
-        # Train with periodic validation; trainer owns early-stopping/checkpoint policy.
+        # Train with periodic validation and early stopping.
         best_epoch, best_val_score = self.trainer.fit(train_dataloader, val_dataloader)
 
-        # Before test-time evaluation, sync workers and restore the best checkpoint.
+        # Sync workers and load the best checkpoint for evaluation.
         self.accelerator.wait_for_everyone()
         self.model = self.accelerator.unwrap_model(self.model)
         if self.checkpoint_path is None:
-            # If we trained in this run, evaluate the best saved model instead of last-step weights.
+            # Load best checkpoint from training (not provided external checkpoint).
             self.model.load_state_dict(torch.load(self.trainer.saved_model_ckpt))
 
-        # Prepare model + test dataloader for distributed-safe inference.
+        # Prepare for DDP inference and enable graph-based decoding if available.
         self.model, test_dataloader = self.accelerator.prepare(
             self.model, test_dataloader
         )
         if self.accelerator.is_main_process and self.checkpoint_path is None:
             self.log(f'Loaded best model checkpoint from {self.trainer.saved_model_ckpt}')
 
-        
-        # If the model supports decoding graph construction, enable it for evaluation efficiency reporting.
         if hasattr(self.trainer.model, 'generate_w_decoding_graph'):
             self.trainer.model.generate_w_decoding_graph = True
         test_results = self.trainer.evaluate(test_dataloader)
 
-        # Emit test metrics to tracker from main process only.
+        # Log test metrics and cleanup.
         if self.accelerator.is_main_process:
             for key in test_results:
                 self.accelerator.log({f'Test_Metric/{key}': test_results[key]})
         self.log(f'Test Results: {test_results}')
-
-        # Ensure tracker resources are closed cleanly.
         self.trainer.end()
         return {
             'best_epoch': best_epoch,
@@ -162,5 +152,5 @@ class Pipeline:
         }
 
     def log(self, message, level='info'):
-        """Framework logging helper that respects distributed setup."""
+        """Log message on main process only (DDP-safe)."""
         return log(message, self.config['accelerator'], self.logger, level=level)

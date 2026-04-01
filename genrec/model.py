@@ -7,32 +7,19 @@ from genrec.tokenizer import AbstractTokenizer
 class AbstractModel(nn.Module):
     """
     Abstract base class for recommendation models.
-
-    ─────────────────────────────────────────────────────────────────────────
-    SHARED CONTEXT PROVIDED TO EVERY MODEL
-    ─────────────────────────────────────────────────────────────────────────
-    `self.config`    : merged runtime/model configuration
-    `self.dataset`   : processed dataset object
-    `self.tokenizer` : tokenizer used to build model inputs
-
-    ─────────────────────────────────────────────────────────────────────────
-    CONTRACT WITH TRAINER / EVALUATOR
-    ─────────────────────────────────────────────────────────────────────────
-    1) Training path:
+    Must fullfill these contracts with trainer/evaluator:
+    
+    1) Implement the forward() method to return an object with a .loss attribute for training:
        `outputs = model(batch)`
        - subclass implements `forward(batch)` (inherited from nn.Module)
        - returned object must expose `.loss` scalar tensor
 
-    2) Evaluation path:
+    2) Implement a generate() method for evaluation/inference:
        `preds = model.generate(batch, n_return_sequences=k)`
        - must return ranked predictions consumable by evaluator
-       - typical shape: `(B, K, L)` where:
+       - typical shape: `(B, K)` where:
            B = batch size
            K = number of returned candidates
-           L = token sequence length of one candidate
-
-    This keeps the base class friendly to many modeling choices (item-ID,
-    semantic-ID, autoregressive, graph-augmented decoding, etc.).
     """
 
     def __init__(

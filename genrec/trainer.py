@@ -31,6 +31,7 @@ class Trainer:
         os.makedirs(os.path.dirname(self.saved_model_ckpt), exist_ok=True)
 
     def fit(self, train_dataloader, val_dataloader):
+        # Setup optimizer and learning rate scheduler.
         optimizer = AdamW(
             self.model.parameters(),
             lr=self.config['lr'],
@@ -49,21 +50,24 @@ class Trainer:
             num_training_steps=total_n_steps,
         )
 
+        # Prepare model, optimizer, and dataloaders for DDP.
         self.model, optimizer, train_dataloader, val_dataloader, scheduler = self.accelerator.prepare(
             self.model, optimizer, train_dataloader, val_dataloader, scheduler
         )
+        # Initialize TensorBoard logging.
         self.accelerator.init_trackers(
             project_name=get_file_name(self.config, suffix=''),
             config=config_for_log(self.config),
             init_kwargs={"tensorboard": {"flush_secs": 60}},
         )
 
+        # Initialize training loop with early stopping tracking.
         n_epochs = np.ceil(total_n_steps / (len(train_dataloader) * self.accelerator.num_processes)).astype(int)
         best_epoch = 0
         best_val_score = -1
 
         for epoch in range(n_epochs):
-            # Training
+            # Training phase: forward, backward, optimize.
             self.model.train()
             total_loss = 0.0
             train_progress_bar = tqdm(
@@ -85,7 +89,7 @@ class Trainer:
             self.accelerator.log({"Loss/train_loss": total_loss / len(train_dataloader)}, step=epoch + 1)
             self.log(f'[Epoch {epoch + 1}] Train Loss: {total_loss / len(train_dataloader)}')
 
-            # Evaluation
+            # Validation phase: periodic evaluation and checkpoint.
             if (epoch + 1) % self.config['eval_interval'] == 0:
                 all_results = self.evaluate(val_dataloader, split='val')
                 if self.accelerator.is_main_process:
@@ -93,17 +97,18 @@ class Trainer:
                         self.accelerator.log({f"Val_Metric/{key}": all_results[key]}, step=epoch + 1)
                     self.log(f'[Epoch {epoch + 1}] Val Results: {all_results}')
                 val_score = all_results[self.config['val_metric']]
+                # Save best checkpoint.
                 if val_score > best_val_score:
                     best_val_score = val_score
                     best_epoch = epoch + 1
                     if self.accelerator.is_main_process:
-                        if self.config['use_ddp']: # unwrap model for saving
+                        if self.config['use_ddp']:
                             unwrapped_model = self.accelerator.unwrap_model(self.model)
                             torch.save(unwrapped_model.state_dict(), self.saved_model_ckpt)
                         else:
                             torch.save(self.model.state_dict(), self.saved_model_ckpt)
                         self.log(f'[Epoch {epoch + 1}] Saved model checkpoint to {self.saved_model_ckpt}')
-
+                # Early stopping.
                 if self.config['patience'] is not None and epoch + 1 - best_epoch >= self.config['patience']:
                     self.log(f'Early stopping at epoch {epoch + 1}')
                     break
@@ -111,6 +116,7 @@ class Trainer:
         return best_epoch, best_val_score
 
     def evaluate(self, dataloader, split='test'):
+        # Disable gradients and set model to eval mode.
         self.model.eval()
 
         all_results = defaultdict(list)
@@ -122,7 +128,8 @@ class Trainer:
         for batch in val_progress_bar:
             with torch.no_grad():
                 batch = {k: v.to(self.accelerator.device) for k, v in batch.items()}
-                if self.config['use_ddp']: # ddp, gather data from all devices for evaluation
+                # Handle DDP: gather predictions from all processes.
+                if self.config['use_ddp']:
                     preds = self.model.module.generate(batch, n_return_sequences=self.evaluator.maxk)
                     if isinstance(preds, tuple):
                         preds, n_visited_items = preds
@@ -138,6 +145,7 @@ class Trainer:
                 for key, value in results.items():
                     all_results[key].append(value)
 
+        # Aggregate metrics across all batches.
         output_results = OrderedDict()
         for metric in self.config['metrics']:
             for k in self.config['topk']:
