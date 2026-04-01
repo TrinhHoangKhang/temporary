@@ -118,8 +118,12 @@ def main():
         
         logger.info('Splitting dataset...')
         split_datasets = dataset.split()
+        
+        logger.info("Train split:")
         logger.info(split_datasets['train'])
+        logger.info("Validation split:")
         logger.info(split_datasets['val'])
+        logger.info("Test split:")
         logger.info(split_datasets['test'])
         
         # 2. Check number of samples
