@@ -71,7 +71,12 @@ class Pipeline:
         else:
             assert isinstance(model_name, str), 'Tokenizer must be provided if model_name is not a string.'
             self.tokenizer = get_tokenizer(model_name)(self.config, self.raw_dataset)
-        self.tokenized_datasets = self.tokenizer.tokenize(self.split_datasets)
+        
+        try:
+            self.tokenized_datasets = self.tokenizer.tokenize(self.split_datasets)
+        except Exception as e:
+            self.log(f'ERROR during tokenization: {e}', level='error')
+            raise
 
         # Build model on main process first to avoid duplicated expensive initialization.
         with self.accelerator.main_process_first():
