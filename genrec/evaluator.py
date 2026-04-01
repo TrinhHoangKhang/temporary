@@ -10,16 +10,12 @@ class Evaluator:
         - NDCG@K
 
     Input contract:
-        preds  : torch.LongTensor with shape (B, K, L)
-        labels : torch.LongTensor with shape (B, L)
+        preds  : torch.LongTensor with shape (B, K)
+        labels : torch.LongTensor with shape (B,)
 
     Matching rule:
-        A prediction is correct only when predicted token sequence exactly
-        equals the ground-truth sequence (after optional EOS trimming on label).
-
-    Special case:
-        Some models may return `(preds, n_visited_items)`; this evaluator accepts
-        both plain tensor predictions and that tuple form.
+        A prediction is correct when the predicted item ID exactly
+        equals the ground-truth item ID.
     """
 
     def __init__(self, config, tokenizer):
@@ -46,7 +42,7 @@ class Evaluator:
 
         Returns:
             torch.BoolTensor of shape (B, maxK), where True marks the first rank
-            whose predicted sequence exactly matches the ground-truth sequence.
+            whose predicted item ID exactly matches the ground-truth item ID.
         """
         preds = preds.detach().cpu()
         labels = labels.detach().cpu()
@@ -54,14 +50,10 @@ class Evaluator:
 
         pos_index = torch.zeros((preds.shape[0], self.maxk), dtype=torch.bool)
         for i in range(preds.shape[0]):
-            cur_label = labels[i].tolist()
-            # Ignore everything after EOS in labels (common when labels are padded).
-            if self.eos_token in cur_label:
-                eos_pos = cur_label.index(self.eos_token)
-                cur_label = cur_label[:eos_pos]
+            cur_label = labels[i].item()
             for j in range(self.maxk):
-                cur_pred = preds[i, j].tolist()
-                # Exact sequence equality; partial token overlap does not count.
+                cur_pred = preds[i, j].item()
+                # Exact item ID equality.
                 if cur_pred == cur_label:
                     pos_index[i, j] = True
                     break
@@ -88,10 +80,10 @@ class Evaluator:
 
         Args:
             preds: Either
-                - Tensor with shape (B, K, L), or
+                - Tensor with shape (B, K), or
                 - Tuple `(preds_tensor, n_visited_items)` where `n_visited_items`
                   is a per-example tensor used for efficiency reporting.
-            labels: Tensor with shape (B, L).
+            labels: Tensor with shape (B,).
 
         Returns:
             dict[str, torch.Tensor]:

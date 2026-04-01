@@ -1,50 +1,37 @@
 from logging import getLogger
-
 from genrec.dataset import AbstractDataset
 
+'''
+Tokenize the splited dataset
+INPUT (result after dataset.split()):
+{
+    'train': HF Dataset([
+        {'user': 'A2OKNI5Z', 'item_seq': ['B001A3E5A4', 'B002BVQY1C', 'B003K2WJVQ']},
+        {'user': 'A3K2L9X1', 'item_seq': ['C001M2P5X7', 'C002N3Q6Y8']},
+        ...
+    ]),
+    'val': HF Dataset([...]),
+    'test': HF Dataset([...]),
+}
+OUTPUT (after tokenizer.tokenize()):
+{
+    'train': HF Dataset([
+        {
+            'input_ids': [[1, 5, 20, 0, 0, ...], ...],      # For each sample: Sequence of item IDs (NOT SEMANTIC IDs)
+            'attention_mask': [[1, 1, 1, 0, 0, ...], ...],  # For each sample: show which item are real vs padding
+            'labels': [[10, 15, 0, -100, -100, ...], ...],  # For each sample: target item ID
+            'seq_lens': [3, 2, ...],                        # For each sample: sequence length
+            ... and more depend on the model
+        },
+        ...
+    ]),
+    'val': HF Dataset([...]),   
+    'test': HF Dataset([...]),
+}
 
+Note: The tokenize() output does not concern semantic IDs. The tokenizer save the item2sem mapping and then the model will look up the semantic IDs during training 
+'''
 class AbstractTokenizer:
-    """
-    Abstract base class for all tokenizers in this framework.
-
-    ─────────────────────────────────────────────────────────────────────────
-    WHAT THIS CLASS DOES
-    ─────────────────────────────────────────────────────────────────────────
-    A tokenizer bridges:
-        dataset split output (raw IDs)
-            {'user': str, 'item_seq': list[str]}
-    and
-        model-ready tensors (tokenized features)
-            {'input_ids': ..., 'attention_mask': ..., 'labels': ..., ...}
-            
-    ─────────────────────────────────────────────────────────────────────────
-    INPUT CONTRACT
-    ─────────────────────────────────────────────────────────────────────────
-    `tokenize(datasets)` receives a dict with split keys:
-        {
-            'train': HF Dataset(columns=['user', 'item_seq']),
-            'val':   HF Dataset(columns=['user', 'item_seq']),
-            'test':  HF Dataset(columns=['user', 'item_seq']),
-        }
-
-    Each row contains raw string IDs (not integer token IDs).
-
-    ─────────────────────────────────────────────────────────────────────────
-    OUTPUT CONTRACT
-    ─────────────────────────────────────────────────────────────────────────
-    `tokenize(datasets)` must return:
-        {
-            'train': HF Dataset(...tokenized columns...),
-            'val':   HF Dataset(...tokenized columns...),
-            'test':  HF Dataset(...tokenized columns...),
-        }
-
-    De facto required fields:
-        - `labels` for all splits
-        - `idx` for val/test (will be used by evaluator)
-        - `input_ids`, `attention_mask`, 'seq_len': needed by model.forward()/generate()
-
-    """
 
     def __init__(self, config: dict, dataset: AbstractDataset):
         self.config = config

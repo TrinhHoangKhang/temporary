@@ -306,4 +306,4 @@ class RPG(AbstractModel):
                 index=(self.item_id2tokens[1:,:] - 1).unsqueeze(0).expand(token_logits.shape[0], -1, -1)  # (batch_size, n_items, code_dim)
             ).mean(dim=-1)
             preds = item_logits.topk(n_return_sequences, dim=-1).indices + 1
-            return preds.unsqueeze(-1)
+            return preds

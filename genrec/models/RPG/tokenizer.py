@@ -1,33 +1,3 @@
-'''
-Tokenize the splited dataset
-INPUT (result after dataset.split()):
-{
-    'train': HF Dataset([
-        {'user': 'A2OKNI5Z', 'item_seq': ['B001A3E5A4', 'B002BVQY1C', 'B003K2WJVQ']},
-        {'user': 'A3K2L9X1', 'item_seq': ['C001M2P5X7', 'C002N3Q6Y8']},
-        ...
-    ]),
-    'val': HF Dataset([...]),
-    'test': HF Dataset([...]),
-}
-OUTPUT (after tokenizer.tokenize()):
-{
-    'train': HF Dataset([
-        {
-            'input_ids': [[1, 5, 20, 0, 0, ...], ...],      # Sequence of token IDs (NOT SEMANTIC IDs)
-            'attention_mask': [[1, 1, 1, 0, 0, ...], ...],  # Which tokens are real vs padding
-            'labels': [[10, 15, 0, -100, -100, ...], ...],  # Target tokens 
-            'seq_lens': [3, 2, ...],                        # Actual sequence length
-        },
-        ...
-    ]),
-    'val': HF Dataset([...]),
-    'test': HF Dataset([...]),
-}
-
-Note: The tokenize() output does not concern semantic IDs. The tokenizer save the item2sem mapping and then the model will look up the semantic IDs during training 
-'''
-
 import os
 import math
 import json
