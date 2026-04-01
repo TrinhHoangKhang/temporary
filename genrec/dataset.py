@@ -1,4 +1,4 @@
-from logging import getLogger
+import logging
 from datasets import Dataset
 
 
@@ -75,8 +75,9 @@ class AbstractDataset:
 
     def __init__(self, config: dict):
         self.config = config
-        self.accelerator = self.config['accelerator']
-        self.logger = getLogger()
+        # Accelerator is optional; only used in distributed training contexts
+        self.accelerator = self.config.get('accelerator', None)
+        self.logger = logging.getLogger(__name__)
 
         # Filled by dataset-specific raw processing.
         self.all_item_seqs = {}
@@ -212,5 +213,10 @@ class AbstractDataset:
         return self.split_data
 
     def log(self, message, level='info'):
-        from genrec.utils import log
-        return log(message, self.config['accelerator'], self.logger, level=level)
+        """Simple logging that works with or without accelerator."""
+        log_func = getattr(self.logger, level, self.logger.info)
+        log_func(message)
+        # Also log to accelerator if available (for distributed training)
+        if self.accelerator is not None:
+            from genrec.utils import log
+            log(message, self.accelerator, self.logger, level=level)
