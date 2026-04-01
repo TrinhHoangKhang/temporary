@@ -79,21 +79,29 @@ class Evaluator:
         Compute all configured metrics for a batch.
 
         Args:
-            preds: Tensor with shape (B, K)
+            preds: Either
+                - Tensor with shape (B, K), or
+                - Tuple `(preds_tensor, n_visited_items)` where `n_visited_items`
+                  is a per-example tensor used for efficiency reporting.
             labels: Tensor with shape (B,).
 
         Returns:
             dict[str, torch.Tensor]:
-                metric tensors keyed as `recall@k` and `ndcg@k`.
+                metric tensors keyed as `recall@k`, `ndcg@k`, plus
+                `n_visited_items`.
         """
-        # Handle predictions (ignore tuple unpacking since we don't track n_visited_items)
+        # Some decoding implementations return extra search-efficiency metadata.
         if isinstance(preds, tuple):
-            preds, _ = preds
-        
+            preds, n_visited_items = preds
+        else:
+            # Fallback: assume full-catalog scoring when metadata is unavailable.
+            n_visited_items = torch.FloatTensor([len(self.tokenizer.item2tokens)] * preds.shape[0])
         results = {}
         # Compute the hit matrix once and reuse for all ranking metrics.
         pos_index = self.calculate_pos_index(preds, labels)
         for metric in self.config['metrics']:
             for k in self.config['topk']:
                 results[f"{metric}@{k}"] = self.metric2func[metric](pos_index, k)
+        # Keep this separate from ranking metrics for easy reporting.
+        results['n_visited_items'] = n_visited_items
         return results

@@ -143,7 +143,8 @@ class Trainer:
             for k in self.config['topk']:
                 key = f"{metric}@{k}"
                 output_results[key] = torch.cat(all_results[key]).mean().item()
-        output_results['n_visited_items'] = torch.cat(all_results['n_visited_items']).mean().item()
+        if all_results['n_visited_items']:
+            output_results['n_visited_items'] = torch.cat(all_results['n_visited_items']).mean().item()
         return output_results
 
     def case_evaluate(self, dataloader, split='test'):
