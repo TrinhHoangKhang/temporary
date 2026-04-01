@@ -2,7 +2,12 @@
 Simple test script to see the actual output of tokenize() method.
 
 Usage:
-    python test-script/02_tokenizing.py --category Beauty --cache_dir ./cache
+    python test-script/02_tokenizing.py \
+  --category Beauty \
+  --max_users 100 \
+  --max_items 500 \
+  --max_item_seq_len 10 \
+  --sent_emb_model sentence-transformers/sentence-t5-base
 """
 
 import argparse
@@ -166,9 +171,22 @@ def main():
             
             if args.max_users:
                 # Filter to max_users
-                user_list = list(dataset.user2id.keys())[:args.max_users]
-                dataset.user2id = {u: i for i, u in enumerate(user_list)}
-                dataset.id2user = {i: u for u, i in dataset.user2id.items()}
+                user_list = list(dataset.id_mapping['id2user'])[1:args.max_users+1]  # Skip [PAD] at index 0
+                
+                # Update id_mapping
+                dataset.id_mapping['user2id'] = {'[PAD]': 0}
+                dataset.id_mapping['id2user'] = ['[PAD]']
+                for i, user in enumerate(user_list, 1):
+                    dataset.id_mapping['user2id'][user] = i
+                    dataset.id_mapping['id2user'].append(user)
+                
+                # Filter split data
+                dataset.all_item_seqs = {
+                    user: seqs for user, seqs in dataset.all_item_seqs.items()
+                    if user in user_list
+                }
+                
+                # Recreate split_data with filtered users
                 dataset.split_data['train'] = [
                     item for item in dataset.split_data['train']
                     if item['user'] in user_list
@@ -181,19 +199,32 @@ def main():
                     item for item in dataset.split_data['test']
                     if item['user'] in user_list
                 ]
-                logger.info(f'Filtered users: {original_users} → {len(user_list)}')
+                logger.info(f'Filtered users: {original_users} → {len(user_list) + 1} (including [PAD])')
             
             if args.max_items:
-                # Filter to max_items (keep items with highest popularity)
-                item_list = list(dataset.item2id.keys())[:args.max_items]
-                dataset.item2id = {item: i for i, item in enumerate(item_list)}
-                dataset.id_mapping['id2item'] = {i: item for item, i in dataset.item2id.items()}
-                dataset.id2item = dataset.id_mapping['id2item']
+                # Filter to max_items
+                item_list = list(dataset.id_mapping['id2item'])[1:args.max_items+1]  # Skip [PAD] at index 0
+                
+                # Update id_mapping
+                dataset.id_mapping['item2id'] = {'[PAD]': 0}
+                dataset.id_mapping['id2item'] = ['[PAD]']
+                for i, item in enumerate(item_list, 1):
+                    dataset.id_mapping['item2id'][item] = i
+                    dataset.id_mapping['id2item'].append(item)
                 
                 # Filter sequences to only include these items
                 def filter_item_seq(seq):
                     return [item for item in seq if item in item_list]
                 
+                # Update all_item_seqs
+                new_all_item_seqs = {}
+                for user, seqs in dataset.all_item_seqs.items():
+                    filtered_seq = filter_item_seq(seqs)
+                    if len(filtered_seq) > 1:
+                        new_all_item_seqs[user] = filtered_seq
+                dataset.all_item_seqs = new_all_item_seqs
+                
+                # Update split data
                 dataset.split_data['train'] = [
                     {**item, 'item_seq': filter_item_seq(item['item_seq'])}
                     for item in dataset.split_data['train']
@@ -209,9 +240,10 @@ def main():
                     for item in dataset.split_data['test']
                     if len(filter_item_seq(item['item_seq'])) > 1
                 ]
-                logger.info(f'Filtered items: {original_items} → {len(item_list)}')
+                logger.info(f'Filtered items: {original_items} → {len(item_list) + 1} (including [PAD])')
             
             logger.info(f'After filtering:')
+            logger.info(f'  Users: {dataset.n_users}, Items: {dataset.n_items}')
             logger.info(f'  Train samples: {len(dataset.split_data["train"])}')
             logger.info(f'  Val samples: {len(dataset.split_data["val"])}')
             logger.info(f'  Test samples: {len(dataset.split_data["test"])}')
