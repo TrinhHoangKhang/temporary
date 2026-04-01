@@ -244,6 +244,7 @@ def main():
         print_separator("STEP 3: Creating Tokenizer")
         tokenizer_config = {
             **config,
+            # Tokenizer config
             'max_item_seq_len': 50,
             'num_proc': 1,
             'n_codebook': 32,
@@ -257,6 +258,23 @@ def main():
             'opq_gpu_id': 0,
             'faiss_omp_num_threads': 32,
             'accelerator': None,
+            # RPG Model config
+            'n_embd': 448,
+            'n_layer': 2,
+            'n_head': 4,
+            'n_inner': 1024,
+            'activation_function': 'gelu_new',
+            'resid_pdrop': 0.0,
+            'embd_pdrop': 0.5,
+            'attn_pdrop': 0.5,
+            'layer_norm_epsilon': 1e-12,
+            'initializer_range': 0.02,
+            'temperature': 0.07,
+            'num_beams': 50,
+            'n_edges': 50,
+            'propagation_steps': 3,
+            'chunk_size': 1024,
+            'num_workers': 64,
         }
         
         tokenizer = RPGTokenizer(tokenizer_config, dataset)
