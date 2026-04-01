@@ -308,7 +308,7 @@ def main():
         print_separator("STEP 7: Creating Evaluator")
         evaluator_config = {
             'metrics': ['recall', 'ndcg'],
-            'topk': [5, 10],
+            'topk': [5, 10, 50],  # Match num_candidates
         }
         evaluator = Evaluator(evaluator_config, tokenizer)
         logger.info(f'Evaluator created: metrics={evaluator_config["metrics"]}, topk={evaluator_config["topk"]}')
@@ -357,8 +357,10 @@ def main():
         all_results = OrderedDict()
         all_results['recall@5'] = []
         all_results['recall@10'] = []
+        all_results['recall@50'] = []
         all_results['ndcg@5'] = []
         all_results['ndcg@10'] = []
+        all_results['ndcg@50'] = []
         all_results['n_visited_items'] = []
         
         num_batches_processed = 0
@@ -378,7 +380,7 @@ def main():
         # Aggregate results
         print_separator("FINAL TEST RESULTS")
         final_results = OrderedDict()
-        for metric in ['recall@5', 'recall@10', 'ndcg@5', 'ndcg@10']:
+        for metric in ['recall@5', 'recall@10', 'recall@50', 'ndcg@5', 'ndcg@10', 'ndcg@50']:
             if all_results[metric]:
                 values = torch.cat(all_results[metric])
                 final_results[metric] = values.mean().item()
