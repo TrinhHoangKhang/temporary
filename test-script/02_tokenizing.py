@@ -97,6 +97,19 @@ def main():
         default=1,
         help='Number of processes for tokenization'
     )
+    parser.add_argument(
+        '--sent_emb_model',
+        type=str,
+        default='text-embedding-3-large',
+        choices=['text-embedding-3-large', 'sentence-transformers/sentence-t5-base'],
+        help='Sentence embedding model to use'
+    )
+    parser.add_argument(
+        '--openai_api_key',
+        type=str,
+        default=None,
+        help='OpenAI API key (required if using text-embedding-3-large)'
+    )
     
     args = parser.parse_args()
     
@@ -109,6 +122,15 @@ def main():
     logger.info(f'Cache dir: {args.cache_dir}')
     logger.info(f'Metadata mode: {args.metadata_mode}')
     logger.info(f'Max item seq len: {args.max_item_seq_len}')
+    logger.info(f'Sent emb model: {args.sent_emb_model}')
+    
+    # Validate OpenAI API key if using OpenAI model
+    if 'text-embedding-3' in args.sent_emb_model and args.openai_api_key is None:
+        import os
+        args.openai_api_key = os.environ.get('OPENAI_API_KEY')
+        if args.openai_api_key is None:
+            logger.warning('OpenAI API key not provided and OPENAI_API_KEY env var not set')
+            logger.warning('You can provide it with --openai_api_key or set OPENAI_API_KEY env var')
     
     try:
         # Step 1: Create dataset
@@ -141,20 +163,39 @@ def main():
         
         # Step 3: Create tokenizer
         print_separator("STEP 3: Creating Tokenizer")
+        
+        # Determine embedding model config based on choice
+        if 'text-embedding-3-large' in args.sent_emb_model:
+            sent_emb_dim = 3072
+            sent_emb_pca = 512
+            openai_api_key = args.openai_api_key
+        else:  # sentence-t5
+            sent_emb_dim = 768
+            sent_emb_pca = 128
+            openai_api_key = None
+        
         tokenizer_config = {
             **config,
+            # Backbone model config
             'max_item_seq_len': args.max_item_seq_len,
             'num_proc': args.num_proc,
+            
+            # Semantic ID (OPQ) config - SAME AS OFFICIAL PIPELINE
+            'n_codebook': 32,
             'codebook_size': 256,
-            'n_codebook': 4,
-            'sent_emb_dim': 384,  # sentence-transformers default
-            'sent_emb_model': 'sentence-transformers/all-MiniLM-L6-v2',
-            'sent_emb_batch_size': 32,
-            'sent_emb_pca': 0,
-            'device': 'cpu',
             'opq_use_gpu': False,
             'opq_gpu_id': 0,
-            'faiss_omp_num_threads': 16,
+            'faiss_omp_num_threads': 32,
+            
+            # Sentence embedding config - FROM OFFICIAL PIPELINE
+            'sent_emb_model': args.sent_emb_model,
+            'sent_emb_dim': sent_emb_dim,
+            'sent_emb_pca': sent_emb_pca,
+            'sent_emb_batch_size': 512,
+            'device': 'cpu',
+            'openai_api_key': openai_api_key,
+            
+            # Required for tokenizer
             'accelerator': None,  # No distributed training for testing
         }
         
@@ -163,6 +204,9 @@ def main():
         logger.info(f'  - Vocab size: {tokenizer.vocab_size}')
         logger.info(f'  - Max token seq len: {tokenizer.max_token_seq_len}')
         logger.info(f'  - Number of items: {len(tokenizer.item2id)}')
+        logger.info(f'  - Sent emb model: {args.sent_emb_model}')
+        logger.info(f'  - Sent emb dim: {sent_emb_dim}')
+        logger.info(f'  - Sent emb PCA: {sent_emb_pca}')
         
         # Step 4: Tokenize
         print_separator("STEP 4: Tokenizing Datasets")
