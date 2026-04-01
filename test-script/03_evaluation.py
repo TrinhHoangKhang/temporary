@@ -98,13 +98,7 @@ def visualize_predictions(batch, preds, labels, dataset, tokenizer, model, num_e
         # Show input sequence
         input_ids = batch['input_ids'][idx].cpu().tolist()
         print(f"\nInput sequence (item IDs): {input_ids}")
-        print(f"Input sequence (items):")
-        for pos, item_id in enumerate(input_ids):
-            if item_id == 0:  # Padding
-                print(f"  Position {pos}: [PAD]")
-            elif item_id > 0 and item_id < len(id2item):
-                print(f"  Position {pos}: Item {item_id} ({id2item[item_id]})")
-
+    
 
 def inspect_model_internals(model, batch, device):
     """Inspect intermediate outputs from the model."""
@@ -352,7 +346,6 @@ def main():
         
         # Step 11: Full evaluation on all test data
         print_separator("STEP 11: Full Test Set Evaluation")
-        logger.info(f'Evaluating on all {len(test_dataloader)} batches...')
         
         all_results = OrderedDict()
         all_results['recall@5'] = []
