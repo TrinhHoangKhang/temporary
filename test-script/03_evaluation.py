@@ -282,6 +282,7 @@ def main():
         
         # Step 4: Tokenize test split
         print_separator("STEP 4: Tokenizing Test Split")
+        split_datasets = split_datasets['test']  # Only tokenize test split for evaluation
         tokenized_datasets = tokenizer.tokenize(split_datasets)
         logger.info(f'Test split tokenized: {len(tokenized_datasets["test"])} samples')
         
