@@ -163,6 +163,14 @@ def main():
         logger.info(f'Dataset created: {dataset.n_users} users, {dataset.n_items} items')
         logger.info(dataset)
         
+        # Step 2: Split dataset FIRST (before filtering)
+        print_separator("STEP 2: Splitting Dataset")
+        split_datasets = dataset.split()
+        
+        logger.info(f"Train: {len(split_datasets['train'])} samples")
+        logger.info(f"Val: {len(split_datasets['val'])} samples")
+        logger.info(f"Test: {len(split_datasets['test'])} samples")
+        
         # Filter dataset if requested (for faster testing)
         if args.max_users or args.max_items:
             print_separator("FILTERING DATASET FOR FASTER TESTING")
@@ -186,19 +194,12 @@ def main():
                     if user in user_list
                 }
                 
-                # Recreate split_data with filtered users
-                dataset.split_data['train'] = [
-                    item for item in dataset.split_data['train']
-                    if item['user'] in user_list
-                ]
-                dataset.split_data['val'] = [
-                    item for item in dataset.split_data['val']
-                    if item['user'] in user_list
-                ]
-                dataset.split_data['test'] = [
-                    item for item in dataset.split_data['test']
-                    if item['user'] in user_list
-                ]
+                # Filter the HuggingFace datasets
+                for split in ['train', 'val', 'test']:
+                    split_datasets[split] = split_datasets[split].filter(
+                        lambda x: x['user'] in user_list
+                    )
+                
                 logger.info(f'Filtered users: {original_users} → {len(user_list) + 1} (including [PAD])')
             
             if args.max_items:
@@ -224,37 +225,23 @@ def main():
                         new_all_item_seqs[user] = filtered_seq
                 dataset.all_item_seqs = new_all_item_seqs
                 
-                # Update split data
-                dataset.split_data['train'] = [
-                    {**item, 'item_seq': filter_item_seq(item['item_seq'])}
-                    for item in dataset.split_data['train']
-                    if len(filter_item_seq(item['item_seq'])) > 1
-                ]
-                dataset.split_data['val'] = [
-                    {**item, 'item_seq': filter_item_seq(item['item_seq'])}
-                    for item in dataset.split_data['val']
-                    if len(filter_item_seq(item['item_seq'])) > 1
-                ]
-                dataset.split_data['test'] = [
-                    {**item, 'item_seq': filter_item_seq(item['item_seq'])}
-                    for item in dataset.split_data['test']
-                    if len(filter_item_seq(item['item_seq'])) > 1
-                ]
+                # Filter the HuggingFace datasets
+                def has_enough_items(example):
+                    filtered = filter_item_seq(example['item_seq'])
+                    return len(filtered) > 1
+                
+                for split in ['train', 'val', 'test']:
+                    split_datasets[split] = split_datasets[split].map(
+                        lambda x: {'user': x['user'], 'item_seq': filter_item_seq(x['item_seq'])}
+                    ).filter(has_enough_items)
+                
                 logger.info(f'Filtered items: {original_items} → {len(item_list) + 1} (including [PAD])')
             
             logger.info(f'After filtering:')
             logger.info(f'  Users: {dataset.n_users}, Items: {dataset.n_items}')
-            logger.info(f'  Train samples: {len(dataset.split_data["train"])}')
-            logger.info(f'  Val samples: {len(dataset.split_data["val"])}')
-            logger.info(f'  Test samples: {len(dataset.split_data["test"])}')
-        
-        # Step 2: Split dataset
-        print_separator("STEP 2: Splitting Dataset")
-        split_datasets = dataset.split()
-        
-        logger.info(f"Train: {len(split_datasets['train'])} samples")
-        logger.info(f"Val: {len(split_datasets['val'])} samples")
-        logger.info(f"Test: {len(split_datasets['test'])} samples")
+            logger.info(f'  Train samples: {len(split_datasets["train"])}')
+            logger.info(f'  Val samples: {len(split_datasets["val"])}')
+            logger.info(f'  Test samples: {len(split_datasets["test"])}')
         
         # Show example raw data
         print("\n--- EXAMPLE RAW SAMPLE (before tokenization) ---")
