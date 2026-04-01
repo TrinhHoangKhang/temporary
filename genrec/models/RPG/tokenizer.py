@@ -253,7 +253,7 @@ class RPGTokenizer(AbstractTokenizer):
         # Load semantic IDs
         sem_ids_path = os.path.join(
             dataset.cache_dir, 'processed',
-            f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.sem_ids'
+            f'{os.path.basename(self.config["sent_emb_model"])}_{self.index_factory}.json'
         )
 
         if not os.path.exists(sem_ids_path):
