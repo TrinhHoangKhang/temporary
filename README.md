@@ -39,7 +39,7 @@ Returns a dictionary with three HuggingFace `Dataset` objects:
 ## Stage 2: Tokenizer
 
 ### Purpose
-Converts raw item sequences into model-ready integer token sequences. Currently generates **static semantic IDs** using OPQ (Optimized Product Quantization), but architecture supports learnable tokenization in the future.
+Converts raw item sequences into model-ready integer token sequences. 
 
 ### Output Contract
 Returns a dictionary with three tokenized HuggingFace `Dataset` objects:
