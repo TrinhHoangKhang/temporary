@@ -2,7 +2,7 @@
 Standalone script to download and preprocess the dataset independently.
 
 Usage:
-    python scripts/01_download_and_preprocess.py --dataset AmazonReviews2014 --category Books --cache_dir ./cache
+    python scripts/01_download_and_preprocess.py --category Books --cache_dir ./cache
 
 This script can be run without the full pipeline, making it easy to:
 - Download data once and reuse it
@@ -13,8 +13,9 @@ This script can be run without the full pipeline, making it easy to:
 import argparse
 import logging
 import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from genrec.datasets.AmazonReviews2014.dataset import AmazonReviews2014
-from genrec.utils import get_config
 
 
 def setup_logging():
