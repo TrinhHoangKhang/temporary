@@ -1,11 +1,11 @@
 # DiffPQ-GenRec: End-to-End Learnable Semantic IDs for Sequential Recommendation
 
-A modular PyTorch framework for building sequential recommendation models with **learnable semantic item representations**. This project aims to improve upon existing sequential recommendation models by making tokenization differentiable—allowing gradients to flow back and optimize semantic IDs during training.
+This project aims to improve upon existing generative sequential recommendation models by making tokenization differentiable—allowing gradients to flow back and optimize semantic IDs during training.
 
 
 ---
 
-## Architecture Overview
+## Pipeline Overview
 
 ```
 Raw Dataset → Tokenizer → Model (forward/generate) → Evaluator
