@@ -52,6 +52,7 @@ Returns a dictionary with three tokenized HuggingFace `Dataset` objects:
             'mask': [[1, 1, 1, 0, 0, ...], ...],  # Binary: real items vs padding
             'labels': [[10, 15, 0, -100, -100, ...], ...],  # Target item IDs (-100 for padding)
             'seq_lens': [3, 2, ...],                        # Actual sequence length before padding
+            ... More depend on the model
         },
         ...
     ]),
