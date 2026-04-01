@@ -3,7 +3,7 @@ Standalone script to download and preprocess the dataset independently.
 Mostly for debugging
 
 Usage:
-    python scripts/01_download_and_preprocess.py --category Beauty --cache_dir ./cache
+    python test-script/01_download_and_preprocess.py --category Beauty --cache_dir ./cache
 """
 
 import argparse
