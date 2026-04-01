@@ -86,32 +86,7 @@ def main():
     
         dataset = AmazonReviews2014(config)
         
-        # Try showing the result of split() 
         
-        logger.info('Splitting dataset...')
-        split_datasets = dataset.split()
-        logger.info(split_datasets['train'])
-        logger.info(split_datasets['val'])
-        logger.info(split_datasets['test'])
-        
-        # 2. Check number of samples
-        logger.info(f"Train: {len(split_datasets['train'])} samples")
-        logger.info(f"Val: {len(split_datasets['val'])} samples")
-        logger.info(f"Test: {len(split_datasets['test'])} samples")
-
-        # 3. See column names and types
-        logger.info(split_datasets['train'].column_names)
-        logger.info(split_datasets['train'].features)
-
-        # 4. Look at first few samples
-        logger.info(split_datasets['train'][:5])
-
-        # 5. Look at one sample in detail
-        logger.info(split_datasets['train'][0])
-
-        # 6. Iterate through samples
-        for sample in split_datasets['train'].take(3):
-            logger.info(sample)
         
         elapsed = time.time() - start_time
         
@@ -138,6 +113,23 @@ def main():
         
         logger.info('')
         logger.info('Dataset download and preprocessing complete!')
+        
+        # Try showing the result of split() 
+        
+        logger.info('Splitting dataset...')
+        split_datasets = dataset.split()
+        logger.info(split_datasets['train'])
+        logger.info(split_datasets['val'])
+        logger.info(split_datasets['test'])
+        
+        # 2. Check number of samples
+        logger.info(f"Train: {len(split_datasets['train'])} samples")
+        logger.info(f"Val: {len(split_datasets['val'])} samples")
+        logger.info(f"Test: {len(split_datasets['test'])} samples")
+
+        # Look at one sample in detail
+        logger.info('Example train sample:')
+        logger.info(split_datasets['train'][0])
         
     except KeyboardInterrupt:
         logger.warning('Dataset download interrupted by user.')
