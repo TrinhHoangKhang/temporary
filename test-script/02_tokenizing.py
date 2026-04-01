@@ -155,6 +155,7 @@ def main():
             'opq_use_gpu': False,
             'opq_gpu_id': 0,
             'faiss_omp_num_threads': 16,
+            'accelerator': None,  # No distributed training for testing
         }
         
         tokenizer = RPGTokenizer(tokenizer_config, dataset)
