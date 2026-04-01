@@ -1,12 +1,14 @@
 """
 Standalone script to download and preprocess the dataset independently.
+Mostly for debugging
 
 Usage:
-    python scripts/01_download_and_preprocess.py --category Books --cache_dir ./cache
+    python scripts/01_download_and_preprocess.py --category Beauty --cache_dir ./cache
 """
 
 import argparse
 import logging
+from math import log
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -83,6 +85,34 @@ def main():
         start_time = time.time()
     
         dataset = AmazonReviews2014(config)
+        
+        # Try showing the result of split() 
+        
+        logger.info('Splitting dataset...')
+        split_datasets = dataset.split()
+        logger.info(split_datasets['train'])
+        logger.info(split_datasets['val'])
+        logger.info(split_datasets['test'])
+        
+        # 2. Check number of samples
+        logger.info(f"Train: {len(split_datasets['train'])} samples")
+        logger.info(f"Val: {len(split_datasets['val'])} samples")
+        logger.info(f"Test: {len(split_datasets['test'])} samples")
+
+        # 3. See column names and types
+        logger.info(split_datasets['train'].column_names)
+        logger.info(split_datasets['train'].features)
+
+        # 4. Look at first few samples
+        logger.info(split_datasets['train'][:5])
+
+        # 5. Look at one sample in detail
+        logger.info(split_datasets['train'][0])
+
+        # 6. Iterate through samples
+        for sample in split_datasets['train'].take(3):
+            logger.info(sample)
+        
         elapsed = time.time() - start_time
         
         logger.info('')
