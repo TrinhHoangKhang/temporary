@@ -110,6 +110,18 @@ def main():
         default=None,
         help='OpenAI API key (required if using text-embedding-3-large)'
     )
+    parser.add_argument(
+        '--max_users',
+        type=int,
+        default=None,
+        help='Limit dataset to N users (for faster testing). None = use all users'
+    )
+    parser.add_argument(
+        '--max_items',
+        type=int,
+        default=None,
+        help='Limit dataset to N items (for faster testing). None = use all items'
+    )
     
     args = parser.parse_args()
     
@@ -145,6 +157,64 @@ def main():
         dataset = AmazonReviews2014(config)
         logger.info(f'Dataset created: {dataset.n_users} users, {dataset.n_items} items')
         logger.info(dataset)
+        
+        # Filter dataset if requested (for faster testing)
+        if args.max_users or args.max_items:
+            print_separator("FILTERING DATASET FOR FASTER TESTING")
+            original_users = dataset.n_users
+            original_items = dataset.n_items
+            
+            if args.max_users:
+                # Filter to max_users
+                user_list = list(dataset.user2id.keys())[:args.max_users]
+                dataset.user2id = {u: i for i, u in enumerate(user_list)}
+                dataset.id2user = {i: u for u, i in dataset.user2id.items()}
+                dataset.split_data['train'] = [
+                    item for item in dataset.split_data['train']
+                    if item['user'] in user_list
+                ]
+                dataset.split_data['val'] = [
+                    item for item in dataset.split_data['val']
+                    if item['user'] in user_list
+                ]
+                dataset.split_data['test'] = [
+                    item for item in dataset.split_data['test']
+                    if item['user'] in user_list
+                ]
+                logger.info(f'Filtered users: {original_users} → {len(user_list)}')
+            
+            if args.max_items:
+                # Filter to max_items (keep items with highest popularity)
+                item_list = list(dataset.item2id.keys())[:args.max_items]
+                dataset.item2id = {item: i for i, item in enumerate(item_list)}
+                dataset.id_mapping['id2item'] = {i: item for item, i in dataset.item2id.items()}
+                dataset.id2item = dataset.id_mapping['id2item']
+                
+                # Filter sequences to only include these items
+                def filter_item_seq(seq):
+                    return [item for item in seq if item in item_list]
+                
+                dataset.split_data['train'] = [
+                    {**item, 'item_seq': filter_item_seq(item['item_seq'])}
+                    for item in dataset.split_data['train']
+                    if len(filter_item_seq(item['item_seq'])) > 1
+                ]
+                dataset.split_data['val'] = [
+                    {**item, 'item_seq': filter_item_seq(item['item_seq'])}
+                    for item in dataset.split_data['val']
+                    if len(filter_item_seq(item['item_seq'])) > 1
+                ]
+                dataset.split_data['test'] = [
+                    {**item, 'item_seq': filter_item_seq(item['item_seq'])}
+                    for item in dataset.split_data['test']
+                    if len(filter_item_seq(item['item_seq'])) > 1
+                ]
+                logger.info(f'Filtered items: {original_items} → {len(item_list)}')
+            
+            logger.info(f'After filtering:')
+            logger.info(f'  Train samples: {len(dataset.split_data["train"])}')
+            logger.info(f'  Val samples: {len(dataset.split_data["val"])}')
+            logger.info(f'  Test samples: {len(dataset.split_data["test"])}')
         
         # Step 2: Split dataset
         print_separator("STEP 2: Splitting Dataset")
