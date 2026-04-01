@@ -19,7 +19,7 @@ def setup_logging():
     """Setup basic logging to console."""
     logging.basicConfig(
         level=logging.INFO,
-        format='%(message)s'
+        format='%(levelname)s - %(message)s'
     )
 
 
