@@ -6,3 +6,4 @@ ckpt_dir: ckpt/
 run_id: genrec_default  # Change this to your customized run id
 rand_seed: 2024
 reproducibility: True
+steps: ~                # Total training steps (None to use epochs instead)
