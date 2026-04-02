@@ -170,40 +170,74 @@ class RPGTokenizer(AbstractTokenizer):
         return mask
 
     def _generate_semantic_id_opq(self, sent_embs, sem_ids_path, train_mask):
-        """
-        Generates semantic IDs using the OPQ algorithm.
-
-        Args:
-            sent_embs (numpy.ndarray): Array of sentence embeddings.
-            sem_ids_path (str): Path to save the generated semantic IDs.
-            train_mask (numpy.ndarray): Boolean mask indicating the training samples.
-        """
         import faiss
+        import torch
+        
         if self.config['opq_use_gpu']:
             res = faiss.StandardGpuResources()
             res.setTempMemory(1024 * 1024 * 512)
             co = faiss.GpuClonerOptions()
             co.useFloat16 = self.n_digit >= 56
         faiss.omp_set_num_threads(self.config['faiss_omp_num_threads'])
+        
+        # Step 1: Create FAISS index with OPQ + PQ structure
         index = faiss.index_factory(
-            sent_embs.shape[1],
+            sent_embs.shape[1], #shape: (n_item-1, emb_dim)
             self.index_factory,
             faiss.METRIC_INNER_PRODUCT
         )
-        self.log(f'[TOKENIZER] Training index...')
+        
+        self.log(f'[TOKENIZER] Training OPQ index...')
         if self.config['opq_use_gpu']:
             index = faiss.index_cpu_to_gpu(res, self.config['opq_gpu_id'], index, co)
+        
+        # Step 2: Train FAISS - this learns:
+        #   - Rotation matrix R (part of OPQ)
+        #   - PQ centroids (one codebook per chunk)
         index.train(sent_embs[train_mask])
+        
+        # Step 3: Quantize all embeddings using learned R and centroids
         index.add(sent_embs)
+        
         if self.config['opq_use_gpu']:
             index = faiss.index_gpu_to_cpu(index)
 
+        # ==================== NEW: Extract learned components ====================
+        # CHANGE 1: Access the underlying OPQ + IVF structures
         ivf_index = faiss.downcast_index(index.index)
+        
+        # CHANGE 2: Extract the learned ROTATION MATRIX from OPQ
+        # The 'vt' member contains the rotation matrix (transposed)
+        # Shape: (embedding_dim, embedding_dim) e.g., (768, 768)
+        self.log(f'[TOKENIZER] Extracting learned rotation matrix from OPQ...')
+        rotation_matrix_np = faiss.vector_to_array(ivf_index.vt)  # shape (768, 768)
+        rotation_matrix_np = rotation_matrix_np.reshape(sent_embs.shape[1], sent_embs.shape[1])
+        
+        # CHANGE 3: Extract PQ CENTROIDS (the codebooks)
+        # The pq member of OPQ index contains the product quantizer
+        pq_index = ivf_index.pq
+        
+        # Get centroids: shape is (n_digit * codebook_size, dim_per_chunk)
+        # where dim_per_chunk = embedding_dim / n_digit
+        pq_centroids_flat = faiss.vector_to_array(pq_index.centroids)
+        
+        # Reshape into (n_digit, codebook_size, dim_per_chunk)
+        # Example: (8192, 24) -> (32, 256, 24)
+        dim_per_chunk = sent_embs.shape[1] // self.n_digit
+        pq_centroids_np = pq_centroids_flat.reshape(self.n_digit, self.codebook_size, dim_per_chunk)
+        
+        self.log(f'[TOKENIZER] Extracted rotation matrix: {rotation_matrix_np.shape}')
+        self.log(f'[TOKENIZER] Extracted PQ centroids: {pq_centroids_np.shape}')
+        
+        # ==================== Extract discrete codes (for backward compatibility) ====================
+        # CHANGE 4: Keep the original code extraction for generating static semantic IDs
+        # These will be used for item2tokens during initialization
         invlists = faiss.extract_index_ivf(ivf_index).invlists
         ls = invlists.list_size(0)
         pq_codes = faiss.rev_swig_ptr(invlists.get_codes(0), ls * invlists.code_size)
         pq_codes = pq_codes.reshape(-1, invlists.code_size)
 
+        # Decode bitstrings to discrete code indices
         faiss_sem_ids = []
         n_bytes = pq_codes.shape[1]
         for u8code in pq_codes:
@@ -214,6 +248,7 @@ class RPGTokenizer(AbstractTokenizer):
             faiss_sem_ids.append(code)
         pq_codes = np.array(faiss_sem_ids)
 
+        # Save discrete semantic IDs to JSON
         item2sem_ids = {}
         for i in range(pq_codes.shape[0]):
             item = self.id2item[i + 1]
@@ -221,6 +256,13 @@ class RPGTokenizer(AbstractTokenizer):
         self.log(f'[TOKENIZER] Saving semantic IDs to {sem_ids_path}...')
         with open(sem_ids_path, 'w') as f:
             json.dump(item2sem_ids, f)
+        
+        # ==================== CHANGE 5: Return learned components as torch tensors ====================
+        # Convert numpy arrays to PyTorch tensors for use in model
+        rotation_matrix_torch = torch.from_numpy(rotation_matrix_np).float()
+        codebook_centroids_torch = torch.from_numpy(pq_centroids_np).float()
+        
+        return rotation_matrix_torch, codebook_centroids_torch, item2sem_ids
 
     def _sem_ids_to_tokens(self, item2sem_ids: dict) -> dict:
         """
@@ -239,16 +281,50 @@ class RPGTokenizer(AbstractTokenizer):
                 tokens[digit] += self.codebook_size * digit + 1
             item2sem_ids[item] = tuple(tokens)
         return item2sem_ids
+    
+    def _save_learnable_quantizer(self, dataset: AbstractDataset):
+        """
+        NEW METHOD: Save learned rotation matrix and codebook centroids to disk.
+        
+        CHANGE: This enables the model to load pre-trained quantizer components
+        without re-training FAISS every time the tokenizer is initialized.
+        
+        Args:
+            dataset (AbstractDataset): The dataset object.
+        """
+        import torch
+        
+        # Check if we have learned components to save
+        if self.rotation_matrix is None or self.codebook_centroids is None:
+            self.log('[TOKENIZER] No learnable quantizer to save (rotation_matrix or codebook_centroids is None)')
+            return
+        
+        # Create save path
+        quantizer_path = os.path.join(
+            dataset.cache_dir, 'processed',
+            f'learnable_quantizer_{os.path.basename(self.config["sent_emb_model"])}.pt'
+        )
+        
+        # Save rotation matrix and codebook centroids
+        torch.save({
+            'rotation_matrix': self.rotation_matrix,
+            'codebook_centroids': self.codebook_centroids,
+        }, quantizer_path)
+        
+        self.log(f'[TOKENIZER] Saved learnable quantizer to {quantizer_path}')
 
     def _init_tokenizer(self, dataset: AbstractDataset):
         """
         Initialize the tokenizer.
+        
+        CHANGE: Now stores learned rotation matrix and codebook centroids as instance
+        attributes so they can be accessed by the model for learnable quantization.
 
         Args:
             dataset (AbstractDataset): The dataset object.
 
         Returns:
-            dict: A dictionary mapping items to semantic IDs.
+            dict: A dictionary mapping items to semantic IDs (tokens).
         """
         # Load semantic IDs
         sem_ids_path = os.path.join(
@@ -278,7 +354,38 @@ class RPGTokenizer(AbstractTokenizer):
 
             # Generate semantic IDs
             training_item_mask = self._get_items_for_training(dataset)
-            self._generate_semantic_id_opq(sent_embs, sem_ids_path, training_item_mask)
+            
+            # CHANGE: _generate_semantic_id_opq now returns three things instead of just saving to file
+            rotation_matrix, codebook_centroids, item2sem_ids = \
+                self._generate_semantic_id_opq(sent_embs, sem_ids_path, training_item_mask)
+            
+            # CHANGE: Store learned components for access by model
+            self.rotation_matrix = rotation_matrix
+            self.codebook_centroids = codebook_centroids
+            
+            # Log the shapes for debugging
+            self.log(f'[TOKENIZER] Stored rotation_matrix: {self.rotation_matrix.shape}')
+            self.log(f'[TOKENIZER] Stored codebook_centroids: {self.codebook_centroids.shape}')
+        else:
+            # CHANGE: Load learned components from saved file if it exists
+            import torch
+            quantizer_path = os.path.join(
+                dataset.cache_dir, 'processed',
+                f'learnable_quantizer_{os.path.basename(self.config["sent_emb_model"])}.pt'
+            )
+            
+            if os.path.exists(quantizer_path):
+                self.log(f'[TOKENIZER] Loading learnable quantizer from {quantizer_path}...')
+                quantizer_state = torch.load(quantizer_path)
+                self.rotation_matrix = quantizer_state['rotation_matrix']
+                self.codebook_centroids = quantizer_state['codebook_centroids']
+                self.log(f'[TOKENIZER] Loaded rotation_matrix: {self.rotation_matrix.shape}')
+                self.log(f'[TOKENIZER] Loaded codebook_centroids: {self.codebook_centroids.shape}')
+            else:
+                # Initialize as None if not available (backward compatibility)
+                self.rotation_matrix = None
+                self.codebook_centroids = None
+                self.log(f'[TOKENIZER] No learnable quantizer found, using static tokenization')
 
         self.log(f'[TOKENIZER] Loading semantic IDs from {sem_ids_path}...')
         item2sem_ids = json.load(open(sem_ids_path, 'r'))
