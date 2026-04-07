@@ -84,6 +84,10 @@ class RPG(AbstractModel):
         self.temperature = self.config['temperature']
         self.loss_fct = torch.nn.CrossEntropyLoss(ignore_index=tokenizer.ignored_label)
 
+        # NEW: Add learnable quantizer components from tokenizer
+        # The linear_transform can be fine-tuned during model training
+        self._setup_learnable_quantizer()
+
         # Graph-constrained decoding
         self.generate_w_decoding_graph = False
         self.init_flag = False
@@ -91,6 +95,39 @@ class RPG(AbstractModel):
         self.num_beams = config['num_beams']
         self.n_edges = config['n_edges']
         self.propagation_steps = config['propagation_steps']
+
+    def _setup_learnable_quantizer(self):
+        """
+        NEW METHOD: Set up learnable quantizer components from tokenizer.
+        
+        This includes:
+        - linear_transform: A learnable linear layer (initialized from OPQ rotation matrix)
+        - codebook_centroids: The PQ codebook centroids (can be optionally tuned)
+        """
+        if hasattr(self.tokenizer, 'linear_transform') and self.tokenizer.linear_transform is not None:
+            # Copy the linear layer to model and register as a module parameter
+            self.linear_transform = self.tokenizer.linear_transform.to(self.config['device'])
+            self.tokenizer.log(f'[MODEL] Loaded learnable linear_transform from tokenizer')
+        else:
+            # If tokenizer doesn't have linear_transform, create identity
+            emb_dim = self.config.get('sent_emb_dim', 768)
+            self.linear_transform = nn.Linear(emb_dim, emb_dim).to(self.config['device'])
+            torch.nn.init.eye_(self.linear_transform.weight)
+            self.linear_transform.bias.data.zero_()
+            self.tokenizer.log(f'[MODEL] Created identity linear_transform (tokenizer did not provide one)')
+        
+        if hasattr(self.tokenizer, 'codebook_centroids') and self.tokenizer.codebook_centroids is not None:
+            # Register codebook_centroids as a buffer (non-trainable by default)
+            # Can be changed to parameter if needed for fine-tuning
+            self.register_buffer(
+                'codebook_centroids',
+                self.tokenizer.codebook_centroids.to(self.config['device'])
+            )
+            self.tokenizer.log(f'[MODEL] Loaded codebook_centroids from tokenizer: {self.codebook_centroids.shape}')
+        else:
+            self.codebook_centroids = None
+            self.tokenizer.log(f'[MODEL] No codebook_centroids available')
+
 
     def _map_item_tokens(self) -> torch.Tensor:
         """

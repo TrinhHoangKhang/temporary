@@ -3,6 +3,8 @@ import math
 import json
 import numpy as np
 from tqdm import tqdm
+import torch
+import torch.nn as nn
 from sentence_transformers import SentenceTransformer
 
 from genrec.dataset import AbstractDataset
@@ -206,12 +208,20 @@ class RPGTokenizer(AbstractTokenizer):
         # CHANGE 1: Access the underlying OPQ + IVF structures
         ivf_index = faiss.downcast_index(index.index)
         
-        # CHANGE 2: Extract the learned ROTATION MATRIX from OPQ
+        # CHANGE 2: Extract the learned ROTATION MATRIX from OPQ and convert to LINEAR LAYER
         # The 'vt' member contains the rotation matrix (transposed)
         # Shape: (embedding_dim, embedding_dim) e.g., (768, 768)
         self.log(f'[TOKENIZER] Extracting learned rotation matrix from OPQ...')
         rotation_matrix_np = faiss.vector_to_array(ivf_index.vt)  # shape (768, 768)
         rotation_matrix_np = rotation_matrix_np.reshape(sent_embs.shape[1], sent_embs.shape[1])
+        
+        # CHANGE 2b: Create a learnable linear layer initialized with the OPQ rotation matrix
+        # This allows the transformation to be fine-tuned during model training
+        emb_dim = sent_embs.shape[1]
+        linear_transform = nn.Linear(emb_dim, emb_dim)
+        linear_transform.weight.data = torch.from_numpy(rotation_matrix_np).float()
+        linear_transform.bias.data.zero_()  # Initialize bias to zero
+        self.log(f'[TOKENIZER] Created learnable linear layer: {linear_transform.weight.shape}')
         
         # CHANGE 3: Extract PQ CENTROIDS (the codebooks)
         # The pq member of OPQ index contains the product quantizer
@@ -226,7 +236,7 @@ class RPGTokenizer(AbstractTokenizer):
         dim_per_chunk = sent_embs.shape[1] // self.n_digit
         pq_centroids_np = pq_centroids_flat.reshape(self.n_digit, self.codebook_size, dim_per_chunk)
         
-        self.log(f'[TOKENIZER] Extracted rotation matrix: {rotation_matrix_np.shape}')
+        self.log(f'[TOKENIZER] Extracted linear transformation layer: {linear_transform.weight.shape}')
         self.log(f'[TOKENIZER] Extracted PQ centroids: {pq_centroids_np.shape}')
         
         # ==================== Extract discrete codes (for backward compatibility) ====================
@@ -258,11 +268,10 @@ class RPGTokenizer(AbstractTokenizer):
             json.dump(item2sem_ids, f)
         
         # ==================== CHANGE 5: Return learned components as torch tensors ====================
-        # Convert numpy arrays to PyTorch tensors for use in model
-        rotation_matrix_torch = torch.from_numpy(rotation_matrix_np).float()
+        # Convert numpy arrays and linear layer to torch tensors for use in model
         codebook_centroids_torch = torch.from_numpy(pq_centroids_np).float()
         
-        return rotation_matrix_torch, codebook_centroids_torch, item2sem_ids
+        return linear_transform, codebook_centroids_torch, item2sem_ids
 
     def _sem_ids_to_tokens(self, item2sem_ids: dict) -> dict:
         """
@@ -284,19 +293,18 @@ class RPGTokenizer(AbstractTokenizer):
     
     def _save_learnable_quantizer(self, dataset: AbstractDataset):
         """
-        NEW METHOD: Save learned rotation matrix and codebook centroids to disk.
+        NEW METHOD: Save learned linear transformation layer and codebook centroids to disk.
         
         CHANGE: This enables the model to load pre-trained quantizer components
         without re-training FAISS every time the tokenizer is initialized.
+        The linear layer can now be fine-tuned during model training.
         
         Args:
             dataset (AbstractDataset): The dataset object.
         """
-        import torch
-        
         # Check if we have learned components to save
-        if self.rotation_matrix is None or self.codebook_centroids is None:
-            self.log('[TOKENIZER] No learnable quantizer to save (rotation_matrix or codebook_centroids is None)')
+        if self.linear_transform is None or self.codebook_centroids is None:
+            self.log('[TOKENIZER] No learnable quantizer to save (linear_transform or codebook_centroids is None)')
             return
         
         # Create save path
@@ -305,9 +313,11 @@ class RPGTokenizer(AbstractTokenizer):
             f'learnable_quantizer_{os.path.basename(self.config["sent_emb_model"])}.pt'
         )
         
-        # Save rotation matrix and codebook centroids
+        # Save linear transformation layer and codebook centroids
+        # Note: linear_transform is an nn.Linear module, so we save its state_dict
         torch.save({
-            'rotation_matrix': self.rotation_matrix,
+            'linear_transform_weight': self.linear_transform.weight,
+            'linear_transform_bias': self.linear_transform.bias,
             'codebook_centroids': self.codebook_centroids,
         }, quantizer_path)
         
@@ -317,7 +327,7 @@ class RPGTokenizer(AbstractTokenizer):
         """
         Initialize the tokenizer.
         
-        CHANGE: Now stores learned rotation matrix and codebook centroids as instance
+        CHANGE: Now stores learned linear transformation layer and codebook centroids as instance
         attributes so they can be accessed by the model for learnable quantization.
 
         Args:
@@ -355,20 +365,19 @@ class RPGTokenizer(AbstractTokenizer):
             # Generate semantic IDs
             training_item_mask = self._get_items_for_training(dataset)
             
-            # CHANGE: _generate_semantic_id_opq now returns three things instead of just saving to file
-            rotation_matrix, codebook_centroids, item2sem_ids = \
+            # CHANGE: _generate_semantic_id_opq now returns linear_transform, codebook_centroids, and item2sem_ids
+            linear_transform, codebook_centroids, item2sem_ids = \
                 self._generate_semantic_id_opq(sent_embs, sem_ids_path, training_item_mask)
             
             # CHANGE: Store learned components for access by model
-            self.rotation_matrix = rotation_matrix
+            self.linear_transform = linear_transform
             self.codebook_centroids = codebook_centroids
             
             # Log the shapes for debugging
-            self.log(f'[TOKENIZER] Stored rotation_matrix: {self.rotation_matrix.shape}')
+            self.log(f'[TOKENIZER] Stored linear_transform: {self.linear_transform.weight.shape}')
             self.log(f'[TOKENIZER] Stored codebook_centroids: {self.codebook_centroids.shape}')
         else:
             # CHANGE: Load learned components from saved file if it exists
-            import torch
             quantizer_path = os.path.join(
                 dataset.cache_dir, 'processed',
                 f'learnable_quantizer_{os.path.basename(self.config["sent_emb_model"])}.pt'
@@ -377,13 +386,19 @@ class RPGTokenizer(AbstractTokenizer):
             if os.path.exists(quantizer_path):
                 self.log(f'[TOKENIZER] Loading learnable quantizer from {quantizer_path}...')
                 quantizer_state = torch.load(quantizer_path)
-                self.rotation_matrix = quantizer_state['rotation_matrix']
+                
+                # Reconstruct the linear layer from saved weights
+                emb_dim = quantizer_state['linear_transform_weight'].shape[0]
+                self.linear_transform = nn.Linear(emb_dim, emb_dim)
+                self.linear_transform.weight.data = quantizer_state['linear_transform_weight']
+                self.linear_transform.bias.data = quantizer_state['linear_transform_bias']
                 self.codebook_centroids = quantizer_state['codebook_centroids']
-                self.log(f'[TOKENIZER] Loaded rotation_matrix: {self.rotation_matrix.shape}')
+                
+                self.log(f'[TOKENIZER] Loaded linear_transform: {self.linear_transform.weight.shape}')
                 self.log(f'[TOKENIZER] Loaded codebook_centroids: {self.codebook_centroids.shape}')
             else:
                 # Initialize as None if not available (backward compatibility)
-                self.rotation_matrix = None
+                self.linear_transform = None
                 self.codebook_centroids = None
                 self.log(f'[TOKENIZER] No learnable quantizer found, using static tokenization')
 
